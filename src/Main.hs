@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, TupleSections #-}
 
 import Control.Applicative ((<$>), (<*>))
 import qualified Data.ByteString as S
@@ -10,6 +10,8 @@ import OpenSSL (withOpenSSL)
 import Options.Applicative
 import System.IO.Streams (InputStream, OutputStream, stdout)
 import qualified System.IO.Streams as Streams
+import Control.Error
+import Control.Monad.Trans.Class (lift)
 
 data Opts = Opts
     { user :: String
@@ -41,8 +43,9 @@ opts = info (helper <*> optParser) desc
 
 main :: IO ()
 main = do os <- execParser opts 
-          ip <- getIp 
-          updateIp $ dnsparams os ip
+          runScript $ do 
+            ip <- getIp 
+            updateIp $ dnsparams os ip
 
 dnsparams :: Opts -> S.ByteString -> SimpleQuery
 dnsparams (Opts u p i) ip = 
@@ -52,12 +55,28 @@ dnsparams (Opts u p i) ip =
     , ("ip", ip)
     ]
 
-updateIp :: SimpleQuery -> IO ()
-updateIp params = withOpenSSL $ do
-    let r = renderSimpleQuery True params
-    let url = "https://cp.dnsmadeeasy.com/servlet/updateip" <> r
-    get url (\p _ -> print $ getStatusCode p)
+updateIp :: SimpleQuery -> Script ()
+updateIp params = updateIp >>= codeToError
+  where
+    updateIp = lift . withOpenSSL $ do
+        let r = renderSimpleQuery True params
+        let url = "https://cp.dnsmadeeasy.com/servlet/updateip" <> r
+        get url (\p _ -> return . getStatusCode $ p)
 
-getIp :: IO S.ByteString
-getIp = get "http://bot.whatismyipaddress.com" concatHandler
+getIp :: Script S.ByteString
+getIp = do
+    (code, ip) <- lift $ get "http://bot.whatismyipaddress.com" handler
+    codeToError code
+    return ip
+  where
+    handler = \p i -> (getStatusCode p,) <$> concatHandler p i
+
+codeToError :: StatusCode -> Script ()
+codeToError x | x < 300 = return ()
+              | x < 400 = left "unexpected redirect"
+              | x < 500 = left "auth error"
+              | otherwise = left "server error"
+
+
+
 
