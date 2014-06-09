@@ -7,4 +7,4 @@ Dynamic DNS for dnsmadeeasy. This is a simple util that takes a record id and an
 
 TODO: better logging.
 
-This now says something different. What will happen?
+This has changed again. What is going on?
